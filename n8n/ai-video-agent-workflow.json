@@ -66,7 +66,7 @@
             },
             {
               "role": "user",
-              "content": "=Write a YouTube Shorts script about: {{ $json.topic }}\n\nAlso return a JSON-friendly response with these exact keys:\n- script: the full spoken script\n- title: a catchy YouTube title (max 60 chars)\n- description: a 2-sentence YouTube description with hashtags\n- tags: array of 5 relevant tags\n- scenes: array of 4-5 objects, each with {text: \"spoken line(s) for this scene\", visual: \"description of visual/stock footage for this scene\"}"
+              "content": "=Write a YouTube Shorts script about: {{ $json.topic }}\n\nReturn ONLY a valid JSON object with no additional text or markdown formatting. The JSON must have exactly these keys:\n- script: the full spoken script (string)\n- title: a catchy YouTube title, max 60 chars (string)\n- description: a 2-sentence YouTube description with hashtags (string)\n- tags: array of exactly 5 relevant tag strings\n- scenes: array of 4-5 objects, each with {\"text\": \"spoken line(s) for this scene\", \"visual\": \"description of visual/stock footage for this scene\"}\n\nExample format:\n{\"script\":\"...\",\"title\":\"...\",\"description\":\"...\",\"tags\":[\"t1\",\"t2\",\"t3\",\"t4\",\"t5\"],\"scenes\":[{\"text\":\"...\",\"visual\":\"...\"}]}"
             }
           ],
           "temperature": 0.8,
@@ -164,7 +164,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Save audio binary to disk so ffmpeg can use it.\n// n8n's binary data for the TTS audio is in the previous node.\n// We write it to the audioPath computed earlier.\nconst { execSync } = require('child_process');\nconst fs = require('fs');\n\nconst prepData = $('Prepare FFmpeg Command').first().json;\nconst audioBuffer = $('Text-to-Speech (StreamElements)').first().binary?.data?.data;\n\nif (audioBuffer) {\n  fs.writeFileSync(prepData.audioPath, Buffer.from(audioBuffer, 'base64'));\n}\n\nreturn [{ json: prepData }];"
+        "jsCode": "// Save audio binary to disk so ffmpeg can use it.\n// n8n's binary data for the TTS audio is in the previous node.\n// We write it to the audioPath computed earlier.\nconst fs = require('fs');\n\nconst prepData = $('Prepare FFmpeg Command').first().json;\nconst audioBuffer = $('Text-to-Speech (StreamElements)').first().binary?.data?.data;\n\nif (!audioBuffer) {\n  throw new Error('TTS audio data not found in binary output. Check the Text-to-Speech node returned audio.');\n}\n\nfs.writeFileSync(prepData.audioPath, Buffer.from(audioBuffer, 'base64'));\n\nreturn [{ json: prepData }];"
       },
       "id": "node-save-audio",
       "name": "Save Audio to Disk",
@@ -237,7 +237,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extract the upload URL from the Location header returned by YouTube.\n// Then read the video file and upload it.\nconst { execSync } = require('child_process');\nconst fs = require('fs');\n\nconst initResponse = $input.first();\nconst uploadUrl = initResponse.json?.headers?.location ||\n                  initResponse.json?.location;\n\nconst videoPath = $('Check FFmpeg Result').first().json.outputPath;\n\nif (!uploadUrl) {\n  throw new Error('YouTube resumable upload URL not found in response headers.');\n}\nif (!fs.existsSync(videoPath)) {\n  throw new Error(`Video file not found at: ${videoPath}`);\n}\n\nconst stats = fs.statSync(videoPath);\nreturn [{ json: {\n  uploadUrl,\n  videoPath,\n  fileSize: stats.size,\n  title: $('Check FFmpeg Result').first().json.title\n}}];"
+        "jsCode": "// Extract the upload URL from the Location header returned by YouTube.\n// Then read the video file and upload it.\nconst fs = require('fs');\n\nconst initResponse = $input.first();\nconst uploadUrl = initResponse.json?.headers?.location ||\n                  initResponse.json?.location;\n\nconst videoPath = $('Check FFmpeg Result').first().json.outputPath;\n\nif (!uploadUrl) {\n  throw new Error('YouTube resumable upload URL not found in response headers.');\n}\nif (!fs.existsSync(videoPath)) {\n  throw new Error(`Video file not found at: ${videoPath}`);\n}\n\nconst stats = fs.statSync(videoPath);\nreturn [{ json: {\n  uploadUrl,\n  videoPath,\n  fileSize: stats.size,\n  title: $('Check FFmpeg Result').first().json.title\n}}];"
       },
       "id": "node-prep-upload",
       "name": "Prepare Video Upload",

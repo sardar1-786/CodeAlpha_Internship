@@ -354,8 +354,7 @@ To burn subtitles into the video, modify the ffmpeg command in **Prepare FFmpeg 
 
 ```bash
 ffmpeg -i input.mp4 -i audio.mp3 \
-  -filter_complex "[0:v]scale=1080:1920,crop=1080:1920,
-    drawtext=text='%{eif\:n\:d}':fontsize=48:fontcolor=white:x=(w-text_w)/2:y=h-100[v]" \
+  -filter_complex "[0:v]scale=1080:1920,crop=1080:1920,drawtext=text='%{eif\:n\:d}':fontsize=48:fontcolor=white:x=(w-text_w)/2:y=h-100[v]" \
   -map "[v]" -map 1:a -shortest output.mp4
 ```
 

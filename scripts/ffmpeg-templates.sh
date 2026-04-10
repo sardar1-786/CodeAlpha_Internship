@@ -26,6 +26,9 @@ TEXT_COLOR="white"
 SHADOW_COLOR="black"
 WIDTH=1080
 HEIGHT=1920
+# Frame rate: 30 fps is broadly compatible (NTSC/web). Change to 25 for PAL
+# or 24 for film-style content.
+FPS=30
 
 # ---------------------------------------------------------------------------
 # Template 1: Basic vertical crop + audio overlay
@@ -99,13 +102,17 @@ image_with_ken_burns_and_audio() {
   DURATION=$(ffprobe -v error -show_entries format=duration \
     -of default=noprint_wrappers=1:nokey=1 "$INPUT_AUDIO")
 
+  # Compute total frames from duration and frame rate
+  TOTAL_FRAMES=$(echo "$DURATION * $FPS" | bc | cut -d. -f1)
+
   ffmpeg -y \
     -loop 1 -i "$INPUT_IMAGE" \
     -i "$INPUT_AUDIO" \
+    -r "$FPS" \
     -filter_complex \
       "[0:v]scale=8000:-1,\
 zoompan=z='min(zoom+0.0005,1.5)':\
-d=$(echo "$DURATION * 25" | bc | cut -d. -f1):\
+d=${TOTAL_FRAMES}:\
 x='iw/2-(iw/zoom/2)':\
 y='ih/2-(ih/zoom/2)':\
 s=${WIDTH}x${HEIGHT},\
@@ -129,13 +136,16 @@ setsar=1[v]" \
 multi_clip_concat_with_audio() {
   echo "[Template 4] Multi-clip concat + TTS audio..."
 
-  # Build a concat list file
-  local CONCAT_FILE="/tmp/concat_list.txt"
-  > "$CONCAT_FILE"
+  # Use mktemp for safe, unique temporary paths (avoids race conditions)
+  local CONCAT_FILE
+  CONCAT_FILE=$(mktemp /tmp/concat_list.XXXXXX.txt)
+  local CONCAT_OUTPUT
+  CONCAT_OUTPUT=$(mktemp /tmp/concat_output.XXXXXX.mp4)
 
   for clip in "$@"; do
     # Each clip is first scaled/cropped to 9:16
-    local out="/tmp/clip_$(basename "$clip")"
+    local out
+    out=$(mktemp /tmp/clip_XXXXXX.mp4)
     ffmpeg -y -i "$clip" \
       -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=increase,crop=${WIDTH}:${HEIGHT},setsar=1" \
       -c:v libx264 -preset fast -crf 23 -an \
@@ -144,7 +154,6 @@ multi_clip_concat_with_audio() {
   done
 
   # Concatenate all scaled clips
-  local CONCAT_OUTPUT="/tmp/concat_output.mp4"
   ffmpeg -y -f concat -safe 0 -i "$CONCAT_FILE" \
     -c copy "$CONCAT_OUTPUT"
 
@@ -156,6 +165,9 @@ multi_clip_concat_with_audio() {
     -shortest \
     -c:v copy -c:a aac -b:a 128k \
     "$OUTPUT_FILE"
+
+  # Clean up temp files
+  rm -f "$CONCAT_FILE" "$CONCAT_OUTPUT"
 
   echo "Done: $OUTPUT_FILE"
 }
