@@ -1,0 +1,489 @@
+{
+  "name": "AI Video Agent – YouTube Shorts Generator",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0001-4000-8000-100000000001",
+      "name": "Start (Manual Trigger)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-topic",
+              "name": "topic",
+              "value": "={{ $env.VIDEO_TOPIC || 'success mindset motivation' }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-output-dir",
+              "name": "output_dir",
+              "value": "={{ $env.OUTPUT_DIR || 'C:\\\\n8n-video-agent\\\\output' }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-scripts-dir",
+              "name": "scripts_dir",
+              "value": "={{ $env.SCRIPTS_DIR || 'C:\\\\n8n-video-agent\\\\scripts' }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-hf-url",
+              "name": "hf_model_url",
+              "value": "={{ $env.HF_MODEL_URL || 'https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0002-4000-8000-100000000002",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.hf_model_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HF_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"inputs\": \"<|system|>\\nYou are an expert YouTube Shorts script writer. Write motivational, high-energy scripts.</s>\\n<|user|>\\nWrite a complete script for a 45-second motivational YouTube Short about: {{ $json.topic }}\\n\\nFormat EXACTLY like this:\\nHOOK: [One powerful opening sentence, max 10 words]\\nBODY: [3 short sentences, one fact or tip each, max 12 words each]\\nCTA: [One strong closing call-to-action, max 10 words]\\n\\nReturn ONLY the script, no extra explanation.</s>\\n<|assistant|>\",\n  \"parameters\": {\n    \"max_new_tokens\": 250,\n    \"return_full_text\": false,\n    \"temperature\": 0.7,\n    \"do_sample\": true\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "a1b2c3d4-0003-4000-8000-100000000003",
+      "name": "Generate Script (HuggingFace)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the HuggingFace Inference API response and extract the script text.\n// The API returns: [{\"generated_text\": \"...\"}] or {\"generated_text\": \"...\"}\nconst item = $input.first();\nconst data = item.json;\n\nlet scriptText = '';\nif (Array.isArray(data) && data[0] && data[0].generated_text) {\n  scriptText = data[0].generated_text;\n} else if (data.generated_text) {\n  scriptText = data.generated_text;\n} else if (typeof data === 'string') {\n  scriptText = data;\n} else {\n  // Last-resort: stringify and look for generated_text key\n  const raw = JSON.stringify(data);\n  const m = raw.match(/\"generated_text\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*?)\"/);\n  if (m) scriptText = m[1].replace(/\\\\n/g, '\\n').replace(/\\\\t/g, '\\t');\n}\n\n// If model echoed the prompt before answering, take only the part after\nif (scriptText.includes('<|assistant|>')) {\n  scriptText = scriptText.split('<|assistant|>').pop();\n}\nif (scriptText.includes('[/INST]')) {\n  scriptText = scriptText.split('[/INST]').pop();\n}\n\nscriptText = scriptText.trim();\n\n// Fallback: if API call failed or returned empty, use a placeholder script\nif (!scriptText) {\n  scriptText = `HOOK: Your life changes the moment you decide to level up.\\nBODY: Most people wait for the perfect moment. Successful people create it. Every small action today builds your future.\\nCTA: Start right now. Drop a comment: what is your goal?`;\n}\n\nreturn [{\n  json: {\n    ...item.json,\n    script_text: scriptText\n  }\n}];\n"
+      },
+      "id": "a1b2c3d4-0004-4000-8000-100000000004",
+      "name": "Parse Script Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build timestamp-based file paths for all intermediate and output files.\nconst item = $input.first();\nconst ts = Date.now();\nconst outDir = item.json.output_dir;\nconst scriptsDir = item.json.scripts_dir;\n\nreturn [{\n  json: {\n    ...item.json,\n    timestamp: ts,\n    script_file:      `${outDir}\\\\script_${ts}.txt`,\n    voice_file:       `${outDir}\\\\voice_${ts}.mp3`,\n    bg_video_file:    `${outDir}\\\\bg_video_${ts}.mp4`,\n    final_video_file: `${outDir}\\\\final_short_${ts}.mp4`,\n    scripts_dir:      scriptsDir\n  }\n}];\n"
+      },
+      "id": "a1b2c3d4-0005-4000-8000-100000000005",
+      "name": "Build File Paths",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convert the script text string to binary data so the\n// Write Binary File node can save it as a .txt file on disk.\nconst item = $input.first();\nconst scriptText = item.json.script_text || '';\n\nconst buffer = Buffer.from(scriptText, 'utf-8');\nconst binaryData = await this.helpers.prepareBinaryData(\n  buffer,\n  'script.txt',\n  'text/plain'\n);\n\nreturn [{\n  json: item.json,\n  binary: {\n    data: binaryData\n  }\n}];\n"
+      },
+      "id": "a1b2c3d4-0006-4000-8000-100000000006",
+      "name": "Script Text → Binary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 400]
+    },
+    {
+      "parameters": {
+        "fileName": "={{ $json.script_file }}",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0007-4000-8000-100000000007",
+      "name": "Save Script TXT File",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [1520, 400]
+    },
+    {
+      "parameters": {
+        "command": "=python \"{{ $json.scripts_dir }}\\tts_gtts.py\" \"{{ $json.script_file }}\" \"{{ $json.voice_file }}\""
+      },
+      "id": "a1b2c3d4-0008-4000-8000-100000000008",
+      "name": "Generate TTS Audio",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1740, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://pixabay.com/api/videos/?key={{ $env.PIXABAY_API_KEY }}&q={{ encodeURIComponent($json.topic) }}&per_page=5&video_type=film&order=popular",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "a1b2c3d4-0009-4000-8000-100000000009",
+      "name": "Search Pixabay Videos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1960, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract a usable video download URL from the Pixabay API response.\n// Pixabay returns: { hits: [{ videos: { medium: { url: '...' }, small: { url: '...' } } }] }\nconst item = $input.first();\nconst hits = item.json.hits || [];\n\nlet videoUrl = '';\nif (hits.length > 0) {\n  const hit = hits[0];\n  const vids = hit.videos || {};\n  // Prefer medium (1280px wide), fall back to small (960px)\n  videoUrl =\n    (vids.medium && vids.medium.url) ||\n    (vids.small  && vids.small.url)  ||\n    (vids.large  && vids.large.url)  ||\n    '';\n}\n\nif (!videoUrl) {\n  // Fallback: use a public domain sample video hosted on n8n docs\n  videoUrl = 'https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4';\n}\n\nreturn [{\n  json: {\n    ...item.json,\n    bg_video_url: videoUrl,\n    has_video: videoUrl !== ''\n  }\n}];\n"
+      },
+      "id": "a1b2c3d4-000a-4000-8000-100000000010",
+      "name": "Extract Video URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2180, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.bg_video_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "a1b2c3d4-000b-4000-8000-100000000011",
+      "name": "Download Background Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2400, 400]
+    },
+    {
+      "parameters": {
+        "fileName": "={{ $json.bg_video_file }}",
+        "dataPropertyName": "data",
+        "options": {}
+      },
+      "id": "a1b2c3d4-000c-4000-8000-100000000012",
+      "name": "Save Background Video",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [2620, 400]
+    },
+    {
+      "parameters": {
+        "command": "=\"{{ $json.scripts_dir }}\\render_short_ffmpeg.bat\" \"{{ $json.bg_video_file }}\" \"{{ $json.voice_file }}\" \"{{ $json.final_video_file }}\""
+      },
+      "id": "a1b2c3d4-000d-4000-8000-100000000013",
+      "name": "Render Final Video (ffmpeg)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2840, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.hf_model_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HF_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"inputs\": \"<|system|>\\nYou are a YouTube SEO expert. Return only valid JSON, no explanation.</s>\\n<|user|>\\nCreate YouTube Shorts metadata for a video about: {{ $json.topic }}\\n\\nReturn ONLY a JSON object with these exact keys:\\n{\\n  \\\"title\\\": \\\"Catchy title under 60 chars with an emoji\\\",\\n  \\\"description\\\": \\\"2-3 sentence description ending with relevant hashtags\\\",\\n  \\\"tags\\\": [\\\"tag1\\\", \\\"tag2\\\", \\\"tag3\\\", \\\"tag4\\\", \\\"tag5\\\"]\\n}\\n\\nReturn ONLY the JSON object.</s>\\n<|assistant|>\",\n  \"parameters\": {\n    \"max_new_tokens\": 200,\n    \"return_full_text\": false,\n    \"temperature\": 0.5\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "a1b2c3d4-000e-4000-8000-100000000014",
+      "name": "Generate YouTube Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3060, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the HuggingFace response and extract YouTube metadata.\nconst item = $input.first();\nconst data = item.json;\n\nlet metaText = '';\nif (Array.isArray(data) && data[0] && data[0].generated_text) {\n  metaText = data[0].generated_text;\n} else if (data.generated_text) {\n  metaText = data.generated_text;\n}\n\n// Strip any prompt echo\nif (metaText.includes('<|assistant|>')) {\n  metaText = metaText.split('<|assistant|>').pop();\n}\nif (metaText.includes('[/INST]')) {\n  metaText = metaText.split('[/INST]').pop();\n}\nmetaText = metaText.trim();\n\nlet title = '';\nlet description = '';\nlet tags = [];\n\ntry {\n  // Try to extract a JSON object from the response\n  const jsonMatch = metaText.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    const parsed = JSON.parse(jsonMatch[0]);\n    title       = parsed.title       || '';\n    description = parsed.description || '';\n    tags        = Array.isArray(parsed.tags) ? parsed.tags : [];\n  }\n} catch (e) {\n  // Fallback: regex extraction\n  const tm = metaText.match(/\"title\"\\s*:\\s*\"([^\"]+)\"/);\n  const dm = metaText.match(/\"description\"\\s*:\\s*\"([^\"]+)\"/);\n  if (tm) title       = tm[1];\n  if (dm) description = dm[1];\n}\n\n// Final fallbacks if model returned nothing useful\nconst topicClean = (item.json.topic || 'motivation').replace(/\\s+/g, '');\nif (!title)       title       = `🔥 ${item.json.topic} — Change Your Life | #Shorts`;\nif (!description) description = `${item.json.script_text}\\n\\n#Shorts #Motivation #${topicClean} #SuccessMindset`;\nif (!tags.length) tags        = ['Shorts', 'Motivation', item.json.topic, 'SuccessMindset', 'YouTube Shorts'];\n\nreturn [{\n  json: {\n    ...item.json,\n    yt_title:       title,\n    yt_description: description,\n    yt_tags:        tags\n  }\n}];\n"
+      },
+      "id": "a1b2c3d4-000f-4000-8000-100000000015",
+      "name": "Parse Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3280, 400]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "out-video",
+              "name": "final_video_path",
+              "value": "={{ $json.final_video_file }}",
+              "type": "string"
+            },
+            {
+              "id": "out-title",
+              "name": "youtube_title",
+              "value": "={{ $json.yt_title }}",
+              "type": "string"
+            },
+            {
+              "id": "out-desc",
+              "name": "youtube_description",
+              "value": "={{ $json.yt_description }}",
+              "type": "string"
+            },
+            {
+              "id": "out-tags",
+              "name": "youtube_tags",
+              "value": "={{ $json.yt_tags.join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "out-script",
+              "name": "script_text",
+              "value": "={{ $json.script_text }}",
+              "type": "string"
+            },
+            {
+              "id": "out-topic",
+              "name": "topic",
+              "value": "={{ $json.topic }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0010-4000-8000-100000000016",
+      "name": "Output Summary",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [3500, 400]
+    }
+  ],
+  "connections": {
+    "Start (Manual Trigger)": {
+      "main": [
+        [
+          {
+            "node": "Set Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Config": {
+      "main": [
+        [
+          {
+            "node": "Generate Script (HuggingFace)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Script (HuggingFace)": {
+      "main": [
+        [
+          {
+            "node": "Parse Script Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Script Response": {
+      "main": [
+        [
+          {
+            "node": "Build File Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build File Paths": {
+      "main": [
+        [
+          {
+            "node": "Script Text → Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Script Text → Binary": {
+      "main": [
+        [
+          {
+            "node": "Save Script TXT File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Script TXT File": {
+      "main": [
+        [
+          {
+            "node": "Generate TTS Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate TTS Audio": {
+      "main": [
+        [
+          {
+            "node": "Search Pixabay Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Pixabay Videos": {
+      "main": [
+        [
+          {
+            "node": "Extract Video URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video URL": {
+      "main": [
+        [
+          {
+            "node": "Download Background Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Background Video": {
+      "main": [
+        [
+          {
+            "node": "Save Background Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Background Video": {
+      "main": [
+        [
+          {
+            "node": "Render Final Video (ffmpeg)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render Final Video (ffmpeg)": {
+      "main": [
+        [
+          {
+            "node": "Generate YouTube Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate YouTube Metadata": {
+      "main": [
+        [
+          {
+            "node": "Parse Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Metadata": {
+      "main": [
+        [
+          {
+            "node": "Output Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": ""
+  },
+  "id": "ai-video-agent-shorts-v1",
+  "tags": [
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "tag-ai-video",
+      "name": "ai-video"
+    }
+  ]
+}
