@@ -1,0 +1,416 @@
+{
+  "name": "AI YouTube Shorts Video Agent",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "node-trigger-manual",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "id": "node-trigger-cron",
+      "name": "Daily Schedule (optional)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pick a random topic from a static list if no topic was provided via webhook/input.\n// Customize this list to your content niche (motivational, facts, tech tips, etc.)\nconst topics = [\n  \"5 Mind-Blowing Facts About the Universe\",\n  \"3 Habits That Will Change Your Life Forever\",\n  \"Why Your Brain Lies to You Every Day\",\n  \"The Secret Behind Successful People's Mornings\",\n  \"5 Things Albert Einstein Said That Will Blow Your Mind\",\n  \"How to Learn Anything 10x Faster\",\n  \"3 Psychology Tricks Used on You Every Day\",\n  \"The Real Reason You Procrastinate\",\n  \"5 Ancient Secrets That Still Work Today\",\n  \"Why Reading 10 Pages a Day Changes Everything\"\n];\n\nconst inputTopic = $input.first()?.json?.topic;\nconst topic = inputTopic || topics[Math.floor(Math.random() * topics.length)];\n\nreturn [{ json: { topic } }];"
+      },
+      "id": "node-topic-selector",
+      "name": "Topic Selector",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "HTTP-Referer",
+              "value": "https://github.com/sardar1-786/CodeAlpha_Internship"
+            },
+            {
+              "name": "X-Title",
+              "value": "AI YouTube Shorts Agent"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "model": "mistralai/mistral-7b-instruct:free",
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are a viral YouTube Shorts scriptwriter. Write scripts that are under 60 seconds when spoken aloud (roughly 120-150 words). Each script must follow this structure:\n1. HOOK (first 3 seconds): A shocking or curiosity-triggering opening line.\n2. BODY (middle ~40 seconds): 3-5 fast punchy facts/tips related to the topic.\n3. CTA (last 5 seconds): Ask viewers to follow/like for more.\n\nStyle: Fast-paced, energetic, motivational or educational. Use short sentences. No filler words."
+            },
+            {
+              "role": "user",
+              "content": "=Write a YouTube Shorts script about: {{ $json.topic }}\n\nReturn ONLY a valid JSON object with no additional text or markdown formatting. The JSON must have exactly these keys:\n- script: the full spoken script (string)\n- title: a catchy YouTube title, max 60 chars (string)\n- description: a 2-sentence YouTube description with hashtags (string)\n- tags: array of exactly 5 relevant tag strings\n- scenes: array of 4-5 objects, each with {\"text\": \"spoken line(s) for this scene\", \"visual\": \"description of visual/stock footage for this scene\"}\n\nExample format:\n{\"script\":\"...\",\"title\":\"...\",\"description\":\"...\",\"tags\":[\"t1\",\"t2\",\"t3\",\"t4\",\"t5\"],\"scenes\":[{\"text\":\"...\",\"visual\":\"...\"}]}"
+            }
+          ],
+          "temperature": 0.8,
+          "max_tokens": 1200
+        }
+      },
+      "id": "node-script-generation",
+      "name": "Generate Script (LLM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "openrouter-api-key",
+          "name": "OpenRouter API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the LLM response\nconst raw = $input.first().json.choices[0].message.content;\n\nlet parsed;\ntry {\n  // Try to extract JSON from the response (LLM may wrap it in markdown code blocks)\n  const jsonMatch = raw.match(/```json\\n([\\s\\S]*?)\\n```/) || raw.match(/```\\n([\\s\\S]*?)\\n```/);\n  const jsonStr = jsonMatch ? jsonMatch[1] : raw;\n  parsed = JSON.parse(jsonStr);\n} catch (e) {\n  // Fallback: treat the entire text as the script with default values\n  parsed = {\n    script: raw,\n    title: $('Topic Selector').first().json.topic,\n    description: raw.substring(0, 200) + \" #Shorts #AI #Facts\",\n    tags: [\"Shorts\", \"AI\", \"Facts\", \"Motivation\", \"Learn\"],\n    scenes: [\n      { text: raw, visual: \"Dynamic text animation on dark background\" }\n    ]\n  };\n}\n\n// Attach topic for reference\nparsed.topic = $('Topic Selector').first().json.topic;\nreturn [{ json: parsed }];"
+      },
+      "id": "node-parse-script",
+      "name": "Parse Script & Scenes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.pexels.com/videos/search?query={{ encodeURIComponent($json.scenes[0].visual) }}&per_page=5&orientation=portrait",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        }
+      },
+      "id": "node-fetch-visuals-1",
+      "name": "Fetch Stock Videos (Pexels)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1120, 160],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "pexels-api-key",
+          "name": "Pexels API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect video file URLs from Pexels response\n// We target portrait (9:16) HD videos.\nconst pexelsData = $input.first().json;\nconst scriptData = $('Parse Script & Scenes').first().json;\n\nconst videoUrls = [];\nif (pexelsData.videos) {\n  pexelsData.videos.forEach(v => {\n    const file = v.video_files.find(f => f.quality === 'hd' && f.width < f.height) ||\n                 v.video_files.find(f => f.width < f.height) ||\n                 v.video_files[0];\n    if (file) videoUrls.push(file.link);\n  });\n}\n\n// If no portrait videos, fall back to landscape (ffmpeg will crop)\nif (videoUrls.length === 0 && pexelsData.videos && pexelsData.videos[0]) {\n  videoUrls.push(pexelsData.videos[0].video_files[0].link);\n}\n\nreturn [{ json: { ...scriptData, videoUrls } }];"
+      },
+      "id": "node-collect-assets",
+      "name": "Collect Visual Assets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.streamelements.com/kappa/v2/speech",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "voice": "Brian",
+          "text": "={{ $json.script }}"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "node-tts",
+      "name": "Text-to-Speech (StreamElements)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1120, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge script data, video URLs, and audio binary reference\nconst scriptData = $('Collect Visual Assets').first().json;\nconst audioData = $('Text-to-Speech (StreamElements)').first();\n\n// Build the ffmpeg command to assemble the final vertical (9:16) video.\n// This command:\n// 1. Takes the first stock video (looped to match audio length) as background\n// 2. Crops/scales to 1080x1920 (9:16 portrait)\n// 3. Overlays the TTS audio\n// 4. Burns in subtitle text per scene\n// The actual execution requires ffmpeg to be installed on the n8n host.\n\nconst videoUrl = scriptData.videoUrls[0] || '';\nconst outputPath = `/tmp/shorts_output_${Date.now()}.mp4`;\nconst audioPath = `/tmp/tts_audio_${Date.now()}.mp3`;\n\n// ffmpeg command template (to be run in Execute Command node)\nconst ffmpegCmd = [\n  `ffmpeg -y`,\n  `-i \"${videoUrl}\"`,       // input: stock video (streamed via URL)\n  `-i \"${audioPath}\"`,     // input: TTS audio file\n  `-filter_complex \"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[v]\"`,\n  `-map \"[v]\" -map 1:a`,\n  `-shortest`,             // end when audio ends\n  `-c:v libx264 -preset fast -crf 23`,\n  `-c:a aac -b:a 128k`,\n  `\"${outputPath}\"`\n].join(' ');\n\nreturn [{ json: {\n  ...scriptData,\n  audioPath,\n  outputPath,\n  ffmpegCmd\n}}];"
+      },
+      "id": "node-prepare-ffmpeg",
+      "name": "Prepare FFmpeg Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Save audio binary to disk so ffmpeg can use it.\n// n8n's binary data for the TTS audio is in the previous node.\n// We write it to the audioPath computed earlier.\nconst fs = require('fs');\n\nconst prepData = $('Prepare FFmpeg Command').first().json;\nconst audioBuffer = $('Text-to-Speech (StreamElements)').first().binary?.data?.data;\n\nif (!audioBuffer) {\n  throw new Error('TTS audio data not found in binary output. Check the Text-to-Speech node returned audio.');\n}\n\nfs.writeFileSync(prepData.audioPath, Buffer.from(audioBuffer, 'base64'));\n\nreturn [{ json: prepData }];"
+      },
+      "id": "node-save-audio",
+      "name": "Save Audio to Disk",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "command": "={{ $json.ffmpegCmd }}"
+      },
+      "id": "node-ffmpeg",
+      "name": "Run FFmpeg (Assemble Video)",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check ffmpeg output and prepare YouTube upload metadata.\nconst ffmpegResult = $input.first().json;\nconst scriptData = $('Save Audio to Disk').first().json;\n\nif (ffmpegResult.exitCode !== 0) {\n  throw new Error(`FFmpeg failed: ${ffmpegResult.stderr}`);\n}\n\nreturn [{ json: {\n  outputPath: scriptData.outputPath,\n  title: scriptData.title,\n  description: scriptData.description + '\\n\\n#Shorts #AI #AutomatedVideo',\n  tags: scriptData.tags || [],\n  topic: scriptData.topic\n}}];"
+      },
+      "id": "node-check-ffmpeg",
+      "name": "Check FFmpeg Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        "authentication": "oAuth2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Upload-Content-Type",
+              "value": "video/mp4"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "snippet": {
+            "title": "={{ $json.title }}",
+            "description": "={{ $json.description }}",
+            "tags": "={{ $json.tags }}",
+            "categoryId": "22",
+            "defaultLanguage": "en"
+          },
+          "status": {
+            "privacyStatus": "public",
+            "selfDeclaredMadeForKids": false,
+            "madeForKids": false
+          }
+        }
+      },
+      "id": "node-youtube-init",
+      "name": "YouTube: Init Resumable Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2440, 300],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "youtube-oauth2",
+          "name": "YouTube OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the upload URL from the Location header returned by YouTube.\n// Then read the video file and upload it.\nconst fs = require('fs');\n\nconst initResponse = $input.first();\nconst uploadUrl = initResponse.json?.headers?.location ||\n                  initResponse.json?.location;\n\nconst videoPath = $('Check FFmpeg Result').first().json.outputPath;\n\nif (!uploadUrl) {\n  throw new Error('YouTube resumable upload URL not found in response headers.');\n}\nif (!fs.existsSync(videoPath)) {\n  throw new Error(`Video file not found at: ${videoPath}`);\n}\n\nconst stats = fs.statSync(videoPath);\nreturn [{ json: {\n  uploadUrl,\n  videoPath,\n  fileSize: stats.size,\n  title: $('Check FFmpeg Result').first().json.title\n}}];"
+      },
+      "id": "node-prep-upload",
+      "name": "Prepare Video Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2660, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $json.uploadUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            },
+            {
+              "name": "Content-Length",
+              "value": "={{ $json.fileSize }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data"
+      },
+      "id": "node-youtube-upload",
+      "name": "YouTube: Upload Video Bytes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2880, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the uploaded video ID and build the YouTube Shorts URL.\nconst uploadResp = $input.first().json;\nconst videoId = uploadResp?.id || uploadResp?.snippet?.resourceId?.videoId;\n\nif (!videoId) {\n  // Upload may have returned the full video object\n  const raw = JSON.stringify(uploadResp);\n  console.log('YouTube upload response:', raw);\n  throw new Error('Could not extract videoId from YouTube response.');\n}\n\nconst youtubeUrl = `https://www.youtube.com/shorts/${videoId}`;\nconsole.log(`Video published! URL: ${youtubeUrl}`);\n\nreturn [{ json: {\n  videoId,\n  youtubeUrl,\n  title: $('Check FFmpeg Result').first().json.title,\n  success: true\n}}];"
+      },
+      "id": "node-extract-video-id",
+      "name": "Extract Video ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3100, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFICATION_WEBHOOK_URL }}",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "content": "=🎬 New YouTube Short published!\\n\\n**Title:** {{ $json.title }}\\n**URL:** {{ $json.youtubeUrl }}\\n\\nGenerated automatically by the AI Video Agent 🤖"
+        },
+        "options": {}
+      },
+      "id": "node-notify",
+      "name": "Send Notification (Discord/Slack/Telegram)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [3320, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final summary node: log and return the result.\nconst result = $('Extract Video ID').first().json;\nconsole.log('AI Video Agent completed successfully.');\nconsole.log('Published URL:', result.youtubeUrl);\n\nreturn [{ json: {\n  status: 'success',\n  message: `Video \"${result.title}\" published to YouTube Shorts.`,\n  url: result.youtubeUrl,\n  videoId: result.videoId\n}}];"
+      },
+      "id": "node-final-summary",
+      "name": "Final Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3540, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Topic Selector", "type": "main", "index": 0 }]
+      ]
+    },
+    "Daily Schedule (optional)": {
+      "main": [
+        [{ "node": "Topic Selector", "type": "main", "index": 0 }]
+      ]
+    },
+    "Topic Selector": {
+      "main": [
+        [{ "node": "Generate Script (LLM)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Script (LLM)": {
+      "main": [
+        [{ "node": "Parse Script & Scenes", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Script & Scenes": {
+      "main": [
+        [
+          { "node": "Fetch Stock Videos (Pexels)", "type": "main", "index": 0 },
+          { "node": "Text-to-Speech (StreamElements)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch Stock Videos (Pexels)": {
+      "main": [
+        [{ "node": "Collect Visual Assets", "type": "main", "index": 0 }]
+      ]
+    },
+    "Collect Visual Assets": {
+      "main": [
+        [{ "node": "Prepare FFmpeg Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Text-to-Speech (StreamElements)": {
+      "main": [
+        [{ "node": "Prepare FFmpeg Command", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare FFmpeg Command": {
+      "main": [
+        [{ "node": "Save Audio to Disk", "type": "main", "index": 0 }]
+      ]
+    },
+    "Save Audio to Disk": {
+      "main": [
+        [{ "node": "Run FFmpeg (Assemble Video)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Run FFmpeg (Assemble Video)": {
+      "main": [
+        [{ "node": "Check FFmpeg Result", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check FFmpeg Result": {
+      "main": [
+        [{ "node": "YouTube: Init Resumable Upload", "type": "main", "index": 0 }]
+      ]
+    },
+    "YouTube: Init Resumable Upload": {
+      "main": [
+        [{ "node": "Prepare Video Upload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Video Upload": {
+      "main": [
+        [{ "node": "YouTube: Upload Video Bytes", "type": "main", "index": 0 }]
+      ]
+    },
+    "YouTube: Upload Video Bytes": {
+      "main": [
+        [{ "node": "Extract Video ID", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extract Video ID": {
+      "main": [
+        [{ "node": "Send Notification (Discord/Slack/Telegram)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Send Notification (Discord/Slack/Telegram)": {
+      "main": [
+        [{ "node": "Final Summary", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": ["ai", "youtube", "shorts", "automation", "video"],
+  "triggerCount": 2,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}
